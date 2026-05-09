@@ -124,7 +124,7 @@ async function loadPrices() {
   setStatus(true, 'Henter...');
   const today = new Date();
   const dateStr = today.toISOString().split('T')[0];
-  const url = `https://www.elprisenligenu.dk/api/v1/prices/${dateStr}_hour_DK1.json`;
+ const url = `https://www.elprisenligenu.dk/api/v1/prices/${year}/${mm}-${dd}_DK1.json`;
   let data;
   try {
     const res = await fetch(url);
