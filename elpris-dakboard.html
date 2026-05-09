@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elpris Dashboard — N1 · Norlys · DK1</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #fff; color: #1a1a1a; padding: 12px; }
+
+  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+  .top-bar h1 { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+  .status { font-size: 10px; color: #888; display: flex; align-items: center; gap: 5px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: #639922; animation: pulse 2s infinite; flex-shrink: 0; }
+  .dot.err { background: #E24B4A; animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+
+  .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-weight: 500; }
+  .update-btn { font-size: 10px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; color: #555; }
+  .update-btn:hover { background: #f5f5f5; }
+
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
+  .card { background: #f5f5f4; border-radius: 6px; padding: 8px 10px; }
+  .card .lbl { font-size: 10px; color: #888; margin-bottom: 2px; }
+  .card .val { font-size: 18px; font-weight: 600; color: #1a1a1a; }
+  .card .sub { font-size: 9px; color: #aaa; margin-top: 1px; }
+  .card.now .val { color: #185FA5; }
+  .card.cheap .val { color: #3B6D11; }
+  .card.exp .val { color: #A32D2D; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; font-size: 10px; color: #666; align-items: center; }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+
+  .chart-wrap { position: relative; width: 100%; height: 200px; }
+
+  .tariff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .tcard { border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; }
+  .th { font-size: 9px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; }
+  .trow { display: flex; justify-content: space-between; font-size: 10px; padding: 2px 0; border-bottom: 1px solid #f0f0f0; color: #1a1a1a; }
+  .trow:last-child { border-bottom: none; }
+  .trow .tn { color: #888; }
+  .trow.bold .tv { font-weight: 600; }
+  .trow.red .tv { color: #A32D2D; font-weight: 600; }
+  .note { font-size: 9px; color: #bbb; margin-top: 8px; line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>⚡ El-dashboard — N1 · Norlys · DK1</h1>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <span class="badge">DK1 Midtjylland</span>
+    <button class="update-btn" onclick="loadPrices()">↻ Opdater</button>
+    <span class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusTxt">Henter...</span>
+    </span>
+  </div>
+</div>
+
+<div class="cards" id="metricCards">
+  <div class="card"><div class="lbl">Henter data…</div><div class="val">—</div></div>
+</div>
+
+<div class="legend">
+  <span><span class="sw" style="background:#3266ad;"></span>NordPool spot (inkl. moms)</span>
+  <span><span class="sw" style="background:#e08030;"></span>N1 nettarif</span>
+  <span><span class="sw" style="background:#73726c;"></span>Energinet TSO</span>
+  <span><span class="sw" style="background:#639922;"></span>Elafgift</span>
+</div>
+<div class="chart-wrap">
+  <canvas id="priceChart" role="img" aria-label="Timepris i øre per kWh fordelt på spotpris, N1 nettarif og Energinet TSO"></canvas>
+</div>
+
+<div class="tariff-grid">
+  <div class="tcard">
+    <div class="th">N1 nettarif 2026 — Sommer (apr–sep)</div>
+    <div class="trow"><span class="tn">Lavlast (00–06)</span><span class="tv">10,99 øre/kWh</span></div>
+    <div class="trow"><span class="tn">Højlast (06–17, 21–24)</span><span class="tv">16,48 øre/kWh</span></div>
+    <div class="trow red"><span class="tn">Spidslast (17–21)</span><span class="tv">42,83 øre/kWh</span></div>
+    <div class="th" style="margin-top:6px;">N1 nettarif 2026 — Vinter (okt–mar)</div>
+    <div class="trow"><span class="tn">Lavlast (00–06)</span><span class="tv">10,99 øre/kWh</span></div>
+    <div class="trow"><span class="tn">Højlast (06–17, 21–24)</span><span class="tv">32,00 øre/kWh</span></div>
+    <div class="trow red"><span class="tn">Spidslast (17–21)</span><span class="tv">98,00 øre/kWh</span></div>
+  </div>
+  <div class="tcard">
+    <div class="th">Energinet TSO 2026 (fast hele året)</div>
+    <div class="trow"><span class="tn">Nettarif</span><span class="tv">4,3 øre/kWh</span></div>
+    <div class="trow"><span class="tn">Systemtarif</span><span class="tv">7,2 øre/kWh</span></div>
+    <div class="trow bold"><span class="tn">I alt TSO</span><span class="tv">11,5 øre/kWh</span></div>
+    <div class="trow"><span class="tn">Systemabonnement</span><span class="tv">187 kr/år</span></div>
+    <div class="th" style="margin-top:6px;">Stat &amp; Norlys</div>
+    <div class="trow"><span class="tn">Elafgift (stat 2026–27)</span><span class="tv">1,0 øre/kWh</span></div>
+    <div class="trow"><span class="tn">Norlys spotpristillæg</span><span class="tv">~6–12 øre/kWh*</span></div>
+    <div class="trow"><span class="tn">Moms</span><span class="tv">25%</span></div>
+  </div>
+</div>
+
+<p class="note">* Spotpriser hentes live fra elprisenligenu.dk (DK1). Totalpris inkl. moms. Norlys-tillæg varierer efter aftale — tjek din kontrakt. Vintertariffer er estimerede baseret på N1's udmeldte justeringer for 2026.</p>
+
+<script>
+const TSO = 11.5;
+const ELAFGIFT = 1.0;
+const VAT = 1.25;
+let myChart = null;
+
+function getN1Tariff(hour, dateStr) {
+  const m = new Date(dateStr).getMonth() + 1;
+  const isSummer = m >= 4 && m <= 9;
+  if (hour >= 0 && hour < 6) return 10.99;
+  if (hour >= 17 && hour < 21) return isSummer ? 42.83 : 98.0;
+  return isSummer ? 16.48 : 32.0;
+}
+
+function setStatus(ok, txt) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot' + (ok ? '' : ' err');
+  document.getElementById('statusTxt').textContent = txt;
+}
+
+async function loadPrices() {
+  setStatus(true, 'Henter...');
+  const today = new Date();
+  const dateStr = today.toISOString().split('T')[0];
+  const url = `https://www.elprisenligenu.dk/api/v1/prices/${dateStr}_hour_DK1.json`;
+  let data;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data = await res.json();
+  } catch(e) {
+    setStatus(false, 'Fejl – bruger eksempeldata');
+    useFallback(dateStr);
+    return;
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    setStatus(false, 'Ingen data – bruger eksempeldata');
+    useFallback(dateStr);
+    return;
+  }
+  const hours = data.map(d => new Date(d.time_start).getHours());
+  const spotExMoms = data.map(d => d.DKK_per_kWh * 100);
+  renderDash(hours, spotExMoms, dateStr, today.getHours());
+  const ts = today.toLocaleTimeString('da-DK', {hour:'2-digit', minute:'2-digit'});
+  setStatus(true, `Live · ${ts}`);
+}
+
+function useFallback(dateStr) {
+  const hours = Array.from({length:24}, (_,i) => i);
+  const spot = [17.6,14.4,11.2,8.8,8.0,9.6,20.0,30.4,40.0,44.0,41.6,38.4,35.2,32.0,36.0,41.6,56.0,68.0,72.0,65.6,48.0,38.4,28.0,20.0];
+  renderDash(hours, spot, dateStr, new Date().getHours());
+}
+
+function renderDash(hours, spotExMoms, dateStr, nowH) {
+  const labels = hours.map(h => h + ':00');
+  const dso = hours.map(h => getN1Tariff(h, dateStr));
+  const tso = Array(hours.length).fill(TSO);
+  const ela = Array(hours.length).fill(ELAFGIFT);
+  const spotInkl = spotExMoms.map(s => s * VAT);
+  const total = spotInkl.map((s,i) => s + dso[i] + tso[i] + ela[i]);
+
+  const nowIdx = hours.indexOf(nowH);
+  const nowTotal = nowIdx >= 0 ? total[nowIdx] : null;
+  const nowSpot = nowIdx >= 0 ? spotInkl[nowIdx] : null;
+  const minV = Math.min(...total);
+  const maxV = Math.max(...total);
+  const cheapH = hours[total.indexOf(minV)];
+  const expH = hours[total.indexOf(maxV)];
+  const avg = total.reduce((a,b)=>a+b,0) / total.length;
+
+  document.getElementById('metricCards').innerHTML = `
+    <div class="card now"><div class="lbl">Pris nu (kl. ${nowH}:00)</div><div class="val">${nowTotal !== null ? nowTotal.toFixed(1) : '—'} øre</div><div class="sub">inkl. moms + tariffer</div></div>
+    <div class="card"><div class="lbl">Spot nu</div><div class="val">${nowSpot !== null ? nowSpot.toFixed(1) : '—'} øre</div><div class="sub">inkl. moms</div></div>
+    <div class="card cheap"><div class="lbl">Billigste time</div><div class="val">${minV.toFixed(1)} øre</div><div class="sub">kl. ${cheapH}:00–${cheapH+1}:00</div></div>
+    <div class="card exp"><div class="lbl">Dyreste time</div><div class="val">${maxV.toFixed(1)} øre</div><div class="sub">kl. ${expH}:00–${expH+1}:00</div></div>
+    <div class="card"><div class="lbl">Dagsgns.</div><div class="val">${avg.toFixed(1)} øre</div><div class="sub">inkl. alle led</div></div>
+  `;
+
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  if (myChart) myChart.destroy();
+  myChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'NordPool spot', data: spotInkl, backgroundColor: spotInkl.map((_,i) => i === nowIdx ? '#1a4e8a' : '#3266ad'), borderWidth: 0 },
+        { label: 'N1 nettarif', data: dso, backgroundColor: '#e08030', borderWidth: 0 },
+        { label: 'Energinet TSO', data: tso, backgroundColor: '#73726c', borderWidth: 0 },
+        { label: 'Elafgift', data: ela, backgroundColor: '#639922', borderWidth: 0 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: i => `Kl. ${i[0].label}`,
+            footer: i => `Total: ${i.reduce((s,x)=>s+x.raw,0).toFixed(1)} øre/kWh (inkl. moms)`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:12 }, grid:{display:false} },
+        y: { stacked: true, title:{display:true, text:'øre/kWh (inkl. moms)', font:{size:9}}, ticks:{font:{size:9}}, grid:{color:'rgba(0,0,0,0.06)'} }
+      }
+    }
+  });
+}
+
+loadPrices();
+setInterval(loadPrices, 60 * 60 * 1000);
+</script>
+</body>
+</html>
