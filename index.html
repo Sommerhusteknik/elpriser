@@ -7,7 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #fff; color: #1a1a1a; padding: 12px; }
+  html, body { background: transparent; }
+  body { font-family: system-ui, sans-serif; color: #1a1a1a; padding: 12px; }
 
   .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
   .top-bar h1 { font-size: 13px; font-weight: 600; color: #1a1a1a; }
@@ -16,12 +17,12 @@
   .dot.err { background: #E24B4A; animation: none; }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
 
-  .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-weight: 500; }
-  .update-btn { font-size: 10px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; color: #555; }
-  .update-btn:hover { background: #f5f5f5; }
+  .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; color: #1e40af; font-weight: 500; }
+  .update-btn { font-size: 10px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 4px; background: transparent; cursor: pointer; color: #555; }
+  .update-btn:hover { border-color: #555; }
 
   .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
-  .card { background: #f5f5f4; border-radius: 6px; padding: 8px 10px; }
+  .card { border: 1px solid #e5e5e5; border-radius: 6px; padding: 8px 10px; }
   .card .lbl { font-size: 10px; color: #888; margin-bottom: 2px; }
   .card .val { font-size: 18px; font-weight: 600; color: #1a1a1a; }
   .card .sub { font-size: 9px; color: #aaa; margin-top: 1px; }
@@ -32,6 +33,8 @@
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; font-size: 10px; color: #666; align-items: center; }
   .legend span { display: flex; align-items: center; gap: 4px; }
   .sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .sw.minimum { width: 18px; height: 0; border-top: 1px dashed rgba(59,109,17,.5); border-radius: 0; }
+  .period { font-size: 10px; color: #666; margin-bottom: 6px; }
 
   .chart-wrap { position: relative; width: 100%; height: 200px; }
 
@@ -69,9 +72,11 @@
   <span><span class="sw" style="background:#e08030;"></span>N1 nettarif</span>
   <span><span class="sw" style="background:#73726c;"></span>Energinet TSO</span>
   <span><span class="sw" style="background:#639922;"></span>Elafgift</span>
+  <span><span class="sw minimum"></span>Laveste totalpris i dag</span>
 </div>
+<p class="period" id="pricePeriod" aria-live="polite"></p>
 <div class="chart-wrap">
-  <canvas id="priceChart" role="img" aria-label="Timepris i øre per kWh fordelt på spotpris, N1 nettarif og Energinet TSO"></canvas>
+  <canvas id="priceChart" role="img" aria-label="Elpriser i dag og tilgængelige priser i morgen i øre per kWh, med dagens laveste totalpris markeret"></canvas>
 </div>
 
 <div class="tariff-grid">
@@ -105,9 +110,25 @@ const TSO = 11.5;
 const ELAFGIFT = 1.0;
 const VAT = 1.25;
 let myChart = null;
+let loading = false;
+const TIME_ZONE = 'Europe/Copenhagen';
+const dateFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+const timeFormatter = new Intl.DateTimeFormat('da-DK', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+function localDate(date) {
+  return dateFormatter.format(date);
+}
+
+function localTime(date) {
+  return timeFormatter.format(date);
+}
+
+function intervalLabel(record) {
+  return `${localDate(new Date(record.time_start))} kl. ${localTime(new Date(record.time_start))}–${localTime(new Date(record.time_end))}`;
+}
 
 function getN1Tariff(hour, dateStr) {
-  const m = new Date(dateStr).getMonth() + 1;
+  const m = Number(dateStr.slice(5, 7));
   const isSummer = m >= 4 && m <= 9;
   if (hour >= 0 && hour < 6) return 10.99;
   if (hour >= 17 && hour < 21) return isSummer ? 42.83 : 98.0;
@@ -120,71 +141,104 @@ function setStatus(ok, txt) {
   document.getElementById('statusTxt').textContent = txt;
 }
 
+async function fetchPrices(dateStr, optional = false) {
+  const url = `https://www.elprisenligenu.dk/api/v1/prices/${dateStr.slice(0, 4)}/${dateStr.slice(5)}_DK1.json`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (optional && res.status === 404) return [];
+  if (!res.ok) throw new Error(`HTTP ${res.status} (${dateStr})`);
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0 || data.some(d =>
+    !d || !Number.isFinite(d.DKK_per_kWh) ||
+    !Number.isFinite(Date.parse(d.time_start)) ||
+    !Number.isFinite(Date.parse(d.time_end)) ||
+    Date.parse(d.time_end) <= Date.parse(d.time_start) ||
+    localDate(new Date(d.time_start)) !== dateStr
+  )) throw new Error(`Ugyldige prisdata (${dateStr})`);
+  return data.sort((a, b) => Date.parse(a.time_start) - Date.parse(b.time_start));
+}
+
 async function loadPrices() {
+  if (loading) return;
+  loading = true;
   setStatus(true, 'Henter...');
-  const today = new Date();
-  const dateStr = today.toISOString().split('T')[0];
-  const year = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  const url = `https://www.elprisenligenu.dk/api/v1/prices/${year}/${mm}-${dd}_DK1.json`;
-  let data;
+  const now = new Date();
+  const today = localDate(now);
+  const nextDate = new Date(`${today}T12:00:00Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const tomorrow = localDate(nextDate);
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    data = await res.json();
-  } catch(e) {
-    setStatus(false, 'Fejl – bruger eksempeldata');
-    useFallback(dateStr);
-    return;
+    const [current, next] = await Promise.allSettled([fetchPrices(today), fetchPrices(tomorrow, true)]);
+    if (current.status === 'rejected') throw current.reason;
+    const nextData = next.status === 'fulfilled' ? next.value : [];
+    renderDash([...current.value, ...nextData], today, now);
+    document.getElementById('pricePeriod').textContent = nextData.length
+      ? `${today} – ${tomorrow} · Dansk tid`
+      : `${today} · Morgendagens priser er endnu ikke tilgængelige (normalt ca. kl. 13).`;
+    if (next.status === 'rejected') {
+      document.getElementById('pricePeriod').textContent = `${today} · Kun dagens priser vises.`;
+      console.error('Kunne ikke hente morgendagens priser:', next.reason);
+      setStatus(false, 'Fejl ved hentning af morgendagens priser – prøver igen om 5 min.');
+    } else {
+      setStatus(true, `Live · ${localTime(now)}`);
+    }
+  } catch (error) {
+    console.error('Kunne ikke hente elpriser:', error);
+    setStatus(false, myChart ? 'Opdatering fejlede – viser senest hentede priser' : 'Kunne ikke hente priser – prøver igen om 5 min.');
+  } finally {
+    loading = false;
   }
-  if (!Array.isArray(data) || data.length === 0) {
-    setStatus(false, 'Ingen data – bruger eksempeldata');
-    useFallback(dateStr);
-    return;
-  }
-  const hours = data.map(d => new Date(d.time_start).getHours());
-  const spotExMoms = data.map(d => d.DKK_per_kWh * 100);
-  renderDash(hours, spotExMoms, dateStr, today.getHours());
-  const ts = today.toLocaleTimeString('da-DK', {hour:'2-digit', minute:'2-digit'});
-  setStatus(true, `Live · ${ts}`);
 }
 
-function useFallback(dateStr) {
-  const hours = Array.from({length:24}, (_,i) => i);
-  const spot = [17.6,14.4,11.2,8.8,8.0,9.6,20.0,30.4,40.0,44.0,41.6,38.4,35.2,32.0,36.0,41.6,56.0,68.0,72.0,65.6,48.0,38.4,28.0,20.0];
-  renderDash(hours, spot, dateStr, new Date().getHours());
-}
-
-function renderDash(hours, spotExMoms, dateStr, nowH) {
-  const labels = hours.map(h => h + ':00');
-  const dso = hours.map(h => getN1Tariff(h, dateStr));
-  const tso = Array(hours.length).fill(TSO);
-  const ela = Array(hours.length).fill(ELAFGIFT);
-  const spotInkl = spotExMoms.map(s => s * VAT);
+function renderDash(records, today, now) {
+  const labels = records.map(d => `${localDate(new Date(d.time_start)).slice(8)}/${localDate(new Date(d.time_start)).slice(5, 7)} ${localTime(new Date(d.time_start))}`);
+  const dso = records.map(d => getN1Tariff(Number(localTime(new Date(d.time_start)).slice(0, 2)), localDate(new Date(d.time_start))));
+  const tso = Array(records.length).fill(TSO);
+  const ela = Array(records.length).fill(ELAFGIFT);
+  const spotInkl = records.map(d => d.DKK_per_kWh * 100 * VAT);
   const total = spotInkl.map((s,i) => s + dso[i] + tso[i] + ela[i]);
 
-  const nowIdx = hours.indexOf(nowH);
+  const nowIdx = records.findIndex(d => Date.parse(d.time_start) <= now.getTime() && now.getTime() < Date.parse(d.time_end));
   const nowTotal = nowIdx >= 0 ? total[nowIdx] : null;
   const nowSpot = nowIdx >= 0 ? spotInkl[nowIdx] : null;
-  const minV = Math.min(...total);
-  const maxV = Math.max(...total);
-  const cheapH = hours[total.indexOf(minV)];
-  const expH = hours[total.indexOf(maxV)];
-  const avg = total.reduce((a,b)=>a+b,0) / total.length;
+  const todayIndices = records.map((d, i) => localDate(new Date(d.time_start)) === today ? i : -1).filter(i => i >= 0);
+  const minV = Math.min(...todayIndices.map(i => total[i]));
+  const maxV = Math.max(...todayIndices.map(i => total[i]));
+  const cheapRecord = records[todayIndices.find(i => total[i] === minV)];
+  const expensiveRecord = records[todayIndices.find(i => total[i] === maxV)];
+  const duration = i => Date.parse(records[i].time_end) - Date.parse(records[i].time_start);
+  const avg = todayIndices.reduce((sum, i) => sum + total[i] * duration(i), 0) / todayIndices.reduce((sum, i) => sum + duration(i), 0);
 
   document.getElementById('metricCards').innerHTML = `
-    <div class="card now"><div class="lbl">Pris nu (kl. ${nowH}:00)</div><div class="val">${nowTotal !== null ? nowTotal.toFixed(1) : '—'} øre</div><div class="sub">inkl. moms + tariffer</div></div>
+    <div class="card now"><div class="lbl">Pris nu (kl. ${localTime(now)})</div><div class="val">${nowTotal !== null ? nowTotal.toFixed(1) : '—'} øre</div><div class="sub">inkl. moms + tariffer</div></div>
     <div class="card"><div class="lbl">Spot nu</div><div class="val">${nowSpot !== null ? nowSpot.toFixed(1) : '—'} øre</div><div class="sub">inkl. moms</div></div>
-    <div class="card cheap"><div class="lbl">Billigste time</div><div class="val">${minV.toFixed(1)} øre</div><div class="sub">kl. ${cheapH}:00–${cheapH+1}:00</div></div>
-    <div class="card exp"><div class="lbl">Dyreste time</div><div class="val">${maxV.toFixed(1)} øre</div><div class="sub">kl. ${expH}:00–${expH+1}:00</div></div>
-    <div class="card"><div class="lbl">Dagsgns.</div><div class="val">${avg.toFixed(1)} øre</div><div class="sub">inkl. alle led</div></div>
+    <div class="card cheap"><div class="lbl">Billigst i dag</div><div class="val">${minV.toFixed(1)} øre</div><div class="sub">${intervalLabel(cheapRecord)}</div></div>
+    <div class="card exp"><div class="lbl">Dyrest i dag</div><div class="val">${maxV.toFixed(1)} øre</div><div class="sub">${intervalLabel(expensiveRecord)}</div></div>
+    <div class="card"><div class="lbl">Dagsgns.</div><div class="val">${avg.toFixed(1)} øre</div><div class="sub">i dag, inkl. alle led</div></div>
   `;
 
   const ctx = document.getElementById('priceChart').getContext('2d');
   if (myChart) myChart.destroy();
   myChart = new Chart(ctx, {
     type: 'bar',
+    plugins: [{
+      id: 'dailyMinimum',
+      afterDatasetsDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        const y = scales.y.getPixelForValue(minV);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(59,109,17,0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(chartArea.left, y);
+        ctx.lineTo(chartArea.right, y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }],
     data: {
       labels,
       datasets: [
@@ -201,7 +255,7 @@ function renderDash(hours, spotExMoms, dateStr, nowH) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            title: i => `Kl. ${i[0].label}`,
+            title: i => intervalLabel(records[i[0].dataIndex]),
             footer: i => `Total: ${i.reduce((s,x)=>s+x.raw,0).toFixed(1)} øre/kWh (inkl. moms)`
           }
         }
@@ -215,7 +269,7 @@ function renderDash(hours, spotExMoms, dateStr, nowH) {
 }
 
 loadPrices();
-setInterval(loadPrices, 60 * 60 * 1000);
+setInterval(loadPrices, 5 * 60 * 1000);
 </script>
 </body>
 </html>
