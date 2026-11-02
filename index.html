@@ -218,6 +218,14 @@ function renderDash(records, today, now) {
 
   const ctx = document.getElementById('priceChart').getContext('2d');
   if (myChart) myChart.destroy();
+  const elapsed = records.map(d => Date.parse(d.time_end) <= now.getTime());
+  const chartColors = color => {
+    const [red, green, blue] = color.slice(1).match(/.{2}/g).map(value => parseInt(value, 16));
+    const faded = `rgba(${red},${green},${blue},0.35)`;
+    return elapsed.map(isElapsed => isElapsed ? faded : color);
+  };
+  const spotColors = chartColors('#3266ad');
+  if (nowIdx >= 0) spotColors[nowIdx] = '#1a4e8a';
   myChart = new Chart(ctx, {
     type: 'bar',
     plugins: [{
@@ -242,10 +250,10 @@ function renderDash(records, today, now) {
     data: {
       labels,
       datasets: [
-        { label: 'NordPool spot', data: spotInkl, backgroundColor: spotInkl.map((_,i) => i === nowIdx ? '#1a4e8a' : '#3266ad'), borderWidth: 0 },
-        { label: 'N1 nettarif', data: dso, backgroundColor: '#e08030', borderWidth: 0 },
-        { label: 'Energinet TSO', data: tso, backgroundColor: '#73726c', borderWidth: 0 },
-        { label: 'Elafgift', data: ela, backgroundColor: '#639922', borderWidth: 0 }
+        { label: 'NordPool spot', data: spotInkl, backgroundColor: spotColors, borderWidth: 0 },
+        { label: 'N1 nettarif', data: dso, backgroundColor: chartColors('#e08030'), borderWidth: 0 },
+        { label: 'Energinet TSO', data: tso, backgroundColor: chartColors('#73726c'), borderWidth: 0 },
+        { label: 'Elafgift', data: ela, backgroundColor: chartColors('#639922'), borderWidth: 0 }
       ]
     },
     options: {

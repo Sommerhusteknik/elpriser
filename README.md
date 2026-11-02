@@ -7,7 +7,8 @@ og grafen understøtter både time- og kvarterspriser samt sommer-/vintertid.
 
 Den svage, stiplede linje gennem hele grafen markerer **dagens laveste totalpris**
 inkl. moms og de viste tariffer. Nøgletallene for billigste, dyreste og gennemsnit
-gælder kun i dag, også når morgendagens priser vises.
+gælder kun i dag, også når morgendagens priser vises. Afviklede timer dæmpes i
+grafen, mens den aktuelle time fortsat fremhæves.
 
 Siden, kortene og selve grafen har gennemsigtig baggrund og kan indlejres som
 webside/iframe over et baggrundsfoto i DAKboard. Vælg også gennemsigtig baggrund
