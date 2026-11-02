@@ -71,6 +71,9 @@ test('shows both complete days, highlights only now and draws today minimum acro
   assert.equal(config.data.labels[0], '02/11 00.00');
   assert.equal(config.data.labels[24], '03/11 00.00');
   assert.equal(config.data.datasets[0].backgroundColor.filter(c => c === '#1a4e8a').length, 1);
+  assert.equal(config.data.datasets[0].backgroundColor[0], 'rgba(50,102,173,0.35)');
+  assert.equal(config.data.datasets[1].backgroundColor[0], 'rgba(224,128,48,0.35)');
+  assert.equal(config.data.datasets[1].backgroundColor[13], '#e08030');
   assert.equal(config.data.datasets[0].backgroundColor[13], '#1a4e8a');
   assert.match(dash.nodes.metricCards.innerHTML, /86\.0 øre/);
   assert.match(dash.nodes.pricePeriod.textContent, /2026-11-02 – 2026-11-03/);
